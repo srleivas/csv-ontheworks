@@ -10,10 +10,15 @@
 <body>
 <div class="mt-3 container ">
     <form enctype='multipart/form-data'>
-        <label class="form-label fw-bold"> Arquivos: </label>
-        <div>
+
+        <label class="mt-3 fw-bold">Arquivos:</label>
+        <div class="mt-2 input-group input-group-sm">
             <input type="file" id="files" name="files[]" multiple class="form-control form-control-sm">
+
+            <span class="input-group-text ms-1">Usar pasta</span>
+            <input name="target_folder" id="sourceFolder" type="text" class="form-control"/>
         </div>
+
 
         <label class="mt-3 fw-bold">Configuração:</label>
         <div class="mt-2 input-group input-group-sm">
@@ -26,8 +31,7 @@
             </select>
 
             <span class="input-group-text ms-1">Schema</span>
-            <input name="target_schema" id="targetSchema" type="text" class="form-control">
-            </input>
+            <input name="target_schema" id="targetSchema" type="text" class="form-control"/>
 
             <span class="input-group-text ms-1">Ação</span>
             <select name="action" id="action" type="text" class="form-select form-select-sm">
@@ -38,15 +42,15 @@
         <div class="mt-2  input-group input-group-sm">
             <span class="input-group-text">Encoding de</span>
             <select name="source_encoding" id="sourceEncoding" type="text" class="form-select form-select-sm">
-                <option value="auto" selected>Automático</option>
-                <option value="utf8">UTF-8</option>
-                <option value="latin1">ISO-8859-1 (Latin1)</option>
+                <option value="" selected>Automático</option>
+                <option value="UTF-8">UTF-8</option>
+                <option value="ISO-8859-1">ISO-8859-1 (Latin1)</option>
             </select>
 
             <span class="input-group-text ms-1">para</span>
             <select name="target_encoding" id="targetEncoding" type="text" class="form-select form-select-sm">
-                <option value="utf8">UTF-8</option>
-                <option value="latin1">ISO-8859-1 (Latin1)</option>
+                <option value="ISO-8859-1">ISO-8859-1 (Latin1)</option>
+                <option value="UTF-8">UTF-8</option>
             </select>
         </div>
         <button class="btn btn-outline-primary btn-light mt-2" type="button" id="generateBtn">Gerar</button>
@@ -68,12 +72,13 @@
         }
 
         function checkRequiredFields() {
-            return getValueById('files') !== '';
+            return getValueById('files').trim() !== '' || getValueById('sourceFolder').trim() !== '';
         }
 
         function buildFormData() {
             const formData = new FormData;
             const filesGroup = document.getElementById('files');
+            const sourceFolder = getValueById('sourceFolder');
 
             formData.append('separator', getValueById('separator'));
             formData.append('action', getValueById('action'));
@@ -81,8 +86,13 @@
             formData.append('targetEncoding', getValueById('targetEncoding'));
             formData.append('targetSchema', getValueById('targetSchema'));
 
-            for (let i = 0; i < filesGroup.files.length; i++) {
-                formData.append(`file_${i}`, filesGroup.files[i]);
+
+            if (sourceFolder) {
+                formData.append('sourceFolder', sourceFolder);
+            } else {
+                for (let i = 0; i < filesGroup.files.length; i++) {
+                    formData.append(`file_${i}`, filesGroup.files[i]);
+                }
             }
 
             return formData;
@@ -100,7 +110,7 @@
             xhr.onreadystatechange = function (response) {
                 if (this.readyState === 4) {
                     if (this.status === 200) {
-                        return alert('Arquivo com sql gerado.');
+                        return alert('Ação realizada!');
                     } else {
                         alert('Houve um erro ao gerar o arquivo.')
                     }
