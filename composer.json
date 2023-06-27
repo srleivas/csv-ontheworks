@@ -4,6 +4,7 @@
     },
   "require": {
     "ext-iconv": "*",
-    "ext-pgsql": "*"
+    "ext-pgsql": "*",
+    "ext-json": "*"
   }
 }

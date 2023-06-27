@@ -9,7 +9,6 @@ class Builder
     private $sql;
     private $tableName;
     private $schema;
-    private $writeToFile;
     private $headers;
 
     public function __construct()
@@ -31,6 +30,7 @@ class Builder
 
     /**
      * @return void
+     * @throws Exception
      */
     public function build()
     {
@@ -41,15 +41,8 @@ class Builder
 
         $this->createTable($file);
         $this->importData($file);
-//        $this->addTableData($file);
 
         fclose($file);
-
-//        if ($this->writeToFile) {
-//            return $this->writeSqlToFile();
-//        }
-//
-//        $this->saveSqlToDatabase();
     }
 
     /**
@@ -61,10 +54,9 @@ class Builder
         $this->tableName = $this->getFileName();
         $fileHeaders = $this->buildHeaders($file);
 
-        $temporaryTable = $this->writeToFile ? 'CREATE TEMP' : 'CREATE';
         $createTableSql = "
             DROP TABLE IF EXISTS {$this->schema}.{$this->tableName};
-            {$temporaryTable} TABLE {$this->schema}.{$this->tableName} ($fileHeaders);
+            CREATE TABLE {$this->schema}.{$this->tableName} ($fileHeaders);
         ";
 
         $this->sql = preg_replace("/\n$|\s{2,}/", '', $createTableSql);
@@ -72,41 +64,43 @@ class Builder
 
     public function getFileName()
     {
-        return mb_strtolower(preg_replace('/\s|\./', '_', $this->file['name']));
+        $tableName = mb_strtolower(preg_replace('/\s|\./', '_', $this->file['name']));
+        $tableName = preg_replace('/_+/', '_', $tableName);
+        return preg_replace('/_csv/', '', $tableName);
     }
 
     private function buildHeaders($file)
     {
-        $headers = $this->prepareHeaders(fgets($file));
-        $headers = explode($this->separator, $headers);
+        $characterConversion = [
+            'À' => 'A', 'Á' => 'A', 'Ã' => 'A', 'Â' => 'A', 'Ä' => 'A',
+            'à' => 'a', 'á' => 'a', 'ã' => 'a', 'â' => 'a', 'ä' => 'a',
+            'È' => 'E', 'É' => 'E', 'Ê' => 'E', 'Ë' => 'E',
+            'è' => 'e', 'é' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'Ì' => 'I', 'Í' => 'I', 'Î' => 'I', 'Ï' => 'I',
+            'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i',
+            'Ò' => 'O', 'Ó' => 'O', 'Õ' => 'O', 'Ô' => 'O', 'Ö' => 'O',
+            'ò' => 'o', 'ó' => 'o', 'õ' => 'o', 'ô' => 'o', 'ö' => 'o',
+            'Ù' => 'U', 'Ú' => 'U', 'Û' => 'U', 'Ü' => 'U',
+            'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ü' => 'u',
+            'Ç' => 'C', 'ç' => 'c'
+        ];
 
-        $headers = array_map(function ($header) {
+        $headers = fgetcsv($file, 0, $this->separator, 'Þ');
+        $headers = array_map(function ($header) use (&$characterConversion) {
+            list($fromEncoding, $toEncoding) = $this->getStringEncodings($header);
+
+            $header = strtr($header, $characterConversion);
+            $header = mb_convert_encoding($header, $fromEncoding, $toEncoding);
+            $header = preg_replace('/\"|\s+$|\n$|\.|\(|\)/', '', $header);
+            $header = preg_replace("/\s|\/|-/", '_', $header);
+            $header = preg_replace("/_+/", '_', $header);
+            $header = mb_strtolower($header);
+
             return substr($header, 0, 62) . " TEXT";
         }, $headers);
 
         $this->headers = implode(', ', $headers);
-
         return $this->headers;
-    }
-
-    private function prepareHeaders($string)
-    {
-        list($fromEncoding, $toEncoding) = $this->getStringEncodings($string);
-
-        $string = mb_convert_encoding($string, $fromEncoding, $toEncoding);
-        $string = preg_replace(
-            [
-                "/[Ã¡Ã Ã£Ã¢Ã¤]/u", "/[ÃÃ€ÃƒÃ‚Ã„]/u", "/[Ã©Ã¨ÃªÃ«]/u",
-                "/[Ã‰ÃˆÃŠÃ‹]/u", "/[Ã­Ã¬Ã®Ã¯]/u", "/[ÃÃŒÃŽÃ]/u",
-                "/[Ã³Ã²ÃµÃ´Ã¶]/u", "/[Ã“Ã’Ã•Ã”Ã–]/u", "/[ÃºÃ¹Ã»Ã¼]/u",
-                "/[ÃšÃ™Ã›Ãœ]/u", "/Ã±/u", "/Ã‘/u", "/Ã§/u"
-            ],
-            explode(" ", "a A e E i I o O u U n N c"),
-            $string);
-
-        $string = preg_replace('/\"| $|\n$|\.|\(|\)/', '', $string);
-        $string = preg_replace("/\s|\/|-/", '_', $string);
-        return mb_strtolower($string);
     }
 
     /**
@@ -130,6 +124,7 @@ class Builder
     {
         $migrationSchema = $this->schema ?: "migracao_automatica";
 
+        $conn = "-h localhost -p 5432 -d import_csv -U postgres";
         pg_connect("host=localhost port=5432 dbname=import_csv user=postgres");
         $sqlSchema = "CREATE SCHEMA IF NOT EXISTS {$migrationSchema}; ";
 
@@ -144,14 +139,12 @@ class Builder
 
         $headers = str_replace('TEXT', '', $this->headers);
         $sqlCsvImport = "\"\COPY {$migrationSchema}.{$this->tableName} ({$headers}) ";
-        $sqlCsvImport .= "FROM '{$filePath}' (DELIMITER '|', QUOTE '\254', FORMAT 'csv', HEADER)\"";
+        $sqlCsvImport .= "FROM '{$filePath}' (DELIMITER '|', QUOTE 'Þ', FORMAT 'csv', HEADER)\"";
 
-        $conn = "-h localhost -p 5432 -d import_csv -U postgres";
         $command = "psql {$conn} -c {$sqlCsvImport} 2>&1";
         exec($command, $execResult, $execCode);
 
         if ($execCode > 0) {
-            dump($command);
             $mensagemErro = json_encode($execResult);
             if ($mensagemErro) {
                 throw new \Exception("$mensagemErro");
@@ -159,106 +152,5 @@ class Builder
 
             throw new Exception("Houve um problema ao importar para a tabela {$this->tableName}");
         }
-    }
-
-    public function setWriteToFile()
-    {
-        $this->writeToFile = true;
-    }
-
-    /**
-     * @return string
-     */
-    private function writeSqlToFile()
-    {
-        $timestamp = time();
-        $folderPath = __DIR__ . '/../tmp';
-        $fileName = "dump_{$this->tableName}_{$timestamp}.sql";
-
-        if (!file_exists($folderPath)) {
-            mkdir($folderPath);
-            @chmod($folderPath, 0777);
-        }
-
-        $file = fopen("{$folderPath}/{$fileName}", 'w');
-        @chmod("$folderPath/$fileName", 0777);
-
-        fwrite($file, $this->sql);
-        fclose($file);
-
-        return "{$folderPath}/{$fileName}";
-    }
-
-    private function saveSqlToDatabase()
-    {
-        pg_connect("host=localhost port=5432 dbname=import_csv user=postgres");
-
-        $migrationSchema = $this->schema ?: "migracao_automatica";
-        $sqlSchema = "CREATE SCHEMA IF NOT EXISTS {$migrationSchema}; ";
-
-        $createSchemaResult = pg_query($sqlSchema);
-        $saveDataResult = pg_query($this->sql);
-
-        if (pg_last_error() !== '') {
-            $timestamp = time();
-            $folderPath = __DIR__ . '/../log';
-            $fileName = "{$this->tableName}_{$timestamp}.txt";
-
-            if (!file_exists($folderPath)) {
-                mkdir($folderPath);
-                @chmod($folderPath, 0777);
-            }
-
-            $file = fopen("{$folderPath}/{$fileName}", 'w');
-            @chmod("$folderPath/$fileName", 0777);
-
-            $beautySign = str_repeat('=', 25);
-            $logMessage = "{$beautySign} {$this->tableName} {$beautySign}\n";
-            $logMessage .= pg_last_error();
-
-            fwrite($file, $logMessage);
-            fclose($file);
-        }
-    }
-
-    /**
-     * @param $file
-     * @return void
-     */
-    private function addTableData($file)
-    {
-        $data = [];
-        while (!feof($file)) {
-            $fileData = fgets($file);
-            if ($fileData === false) break;
-
-            $columnData = $this->prepareColumnData($fileData);
-            $columnData = explode($this->separator, $columnData);
-
-            foreach ($columnData as $key => $column) {
-                $columnData[$key] = "'{$column}'";
-            }
-
-            $columnData = implode(',', $columnData);
-            $fromEncoding = $this->fromEncoding ?: mb_detect_encoding($columnData);
-            $toEncoding = $this->toEncoding ?: 'UTF-8';
-
-            $columnData = mb_convert_encoding($columnData, $fromEncoding, $toEncoding);
-            $data[] = "({$columnData})";
-        }
-
-        if (empty($data)) {
-            return;
-        }
-
-        $dataSql = implode(',', $data);
-        $sql = "INSERT INTO {$this->schema}.{$this->tableName} VALUES {$dataSql}";
-
-        $this->sql .= $sql;
-    }
-
-    private function prepareColumnData($string)
-    {
-        return preg_replace("/\n$|\"|'|\\\/", '', $string);
     }
 }
